@@ -1,6 +1,13 @@
 #!/usr/bin/env python2
 # encoding: utf-8
 
+# Author: Alexandre Fonseca
+# Description:
+#   Installs, configures and manages Hadoop on a set of nodes
+#   in a cluster.
+# Associated guide: 
+#   http://www.alexjf.net/blog/distributed-systems/hadoop-yarn-installation-definitive-guide
+
 import os
 from fabric.api import run, cd, env, settings, put, sudo
 
