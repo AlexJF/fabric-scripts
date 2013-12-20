@@ -92,8 +92,8 @@ def setupMaster():
 def setupSlave():
     if env.host in JENKINS_SLAVE_HOSTS:
         print("+ Setting up Slave")
-        installSlaveDependencies()
         addJenkinsUser()
+        installSlaveDependencies()
         allowJenkinsMasterSSHKeys()
         disableSSHStrictKeyChecking()
         print("+ Slave setup")
@@ -167,4 +167,9 @@ def disableSSHStrictKeyChecking():
         sudo("echo 'StrictHostKeyChecking no' > config")
 
 def addJenkinsUser():
-    sudo("useradd -m -s /usr/sbin/nologin jenkins")
+    with settings(warn_only=True):
+        if run("getent passwd jenkins").failed:
+            sudo("useradd -m -s /usr/sbin/nologin jenkins")
+        elif run("test -d /home/jenkins").failed:
+            sudo("mkdir -p /home/jenkins")
+            sudo("chown -R jenkins /home/jenkins")
