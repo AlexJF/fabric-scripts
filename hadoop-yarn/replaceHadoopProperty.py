@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-import sys, os
+import sys
+import re
 import xml.etree.ElementTree as ElementTree
 import xml.dom.minidom as minidom
 
@@ -26,11 +27,13 @@ except Exception:
     tree = ElementTree.ElementTree(configurationElement)
     root = tree.getroot()
 
-for prop in root.iter('property'):
-    children = {child.tag: child for child in prop}
+for prop in root.getiterator('property'):
+    children = dict((child.tag, child) for child in prop)
+
+    propertyName = children['name'].text.strip()
 
     try:
-        index = propertyNames.index(children['name'].text)
+        index = propertyNames.index(propertyName)
         children['value'].text = propertyValues[index]
         replaced[index] = True
     except Exception as e:
@@ -50,8 +53,11 @@ def prettify(elem):
     """
     rough_string = ElementTree.tostring(elem, 'utf-8')
     reparsed = minidom.parseString(rough_string)
-    pretty =  reparsed.toprettyxml(indent="\t")
-    return "\n".join([line for line in pretty.split('\n') if line.strip() != ''])
+    pretty = reparsed.toprettyxml(indent="\t")
+    prettyStr = "\n".join([line for line in pretty.split('\n') if line.strip() != ''])
+    fix = re.compile(r'((?<=>)(\n[\t]*)(?=[^<\t]))|(?<=[^>\t])(\n[\t]*)(?=<)')
+    fixedPrettyStr = re.sub(fix, '', prettyStr)
+    return fixedPrettyStr
 
 with open(fileName, "w") as f:
     f.write(prettify(root))

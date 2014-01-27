@@ -5,7 +5,7 @@
 # Description:
 #   Installs, configures and manages Hadoop on a set of nodes
 #   in a cluster.
-# Associated guide: 
+# Associated guide:
 #   http://www.alexjf.net/blog/distributed-systems/hadoop-yarn-installation-definitive-guide
 
 import os
@@ -24,6 +24,7 @@ HADOOP_CONF = os.path.join(HADOOP_PREFIX, "etc/hadoop")
 # remote hosts.
 PACKAGE_MANAGER_INSTALL = "apt-get install %s" # Debian/Ubuntu
 #PACKAGE_MANAGER_INSTALL = "pacman -S %s" # Arch Linux
+#PACKAGE_MANAGER_INSTALL = "yum install %s" # CentOS
 
 # Change this list to the list of packages required by Hadoop
 # In principle, should just be a JRE for Hadoop, Python
@@ -31,13 +32,21 @@ PACKAGE_MANAGER_INSTALL = "apt-get install %s" # Debian/Ubuntu
 # to get the Hadoop package
 REQUIREMENTS = ["wget", "python", "openjdk-7-jre-headless"] # Debian/Ubuntu
 #REQUIREMENTS = ["wget", "python", "jre7-openjdk-headless"] # Arch Linux
+#REQUIREMENTS = ["wget", "python", "java-1.7.0-openjdk-devel"] # CentOS
 
-ENVIRONMENT_FILE = "/home/alex/.profile"
-ENVIRONMENT_VARIABLES = {
-    "JAVA_HOME": "/usr/lib/jvm/java-7-openjdk-amd64", # Debian/Ubuntu 64 bits
-    #"JAVA_HOME": "/usr/lib/jvm/java-7-openjdk", # Arch Linux
-    "HADOOP_PREFIX": HADOOP_PREFIX,
-}
+ENVIRONMENT_FILE = "/home/b.ajf/.bashrc"
+ENVIRONMENT_VARIABLES = [
+    ("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk-amd64"), # Debian/Ubuntu 64 bits
+    #("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk"), # Arch Linux
+    #("JAVA_HOME", "/usr/lib/jvm/java"), # CentOS
+    ("HADOOP_PREFIX", HADOOP_PREFIX),
+    ("HADOOP_HOME", r"\\$HADOOP_PREFIX"),
+    ("HADOOP_COMMON_HOME", r"\\$HADOOP_PREFIX"),
+    ("HADOOP_CONF_DIR", r"\\$HADOOP_PREFIX/etc/hadoop"),
+    ("HADOOP_HDFS_HOME", r"\\$HADOOP_PREFIX"),
+    ("HADOOP_MAPRED_HOME", r"\\$HADOOP_PREFIX"),
+    ("HADOOP_YARN_HOME", r"\\$HADOOP_PREFIX"),
+]
 
 NET_INTERFACE="eth0"
 SSH_USER = "alex"
@@ -45,12 +54,19 @@ NAMENODE_HOST = "namenode.alexjf.net"
 RESOURCEMANAGER_HOST = "resourcemanager.alexjf.net"
 SLAVE_HOSTS = ["slave%d.alexjf.net" % i for i in range(1, 6)]
 # Or equivalently
-#SLAVE_HOSTS = ["slave1.alexjf.net", "slave2.alexjf.net", 
-#          "slave3.alexjf.net", "slave4.alexjf.net", 
+#SLAVE_HOSTS = ["slave1.alexjf.net", "slave2.alexjf.net",
+#          "slave3.alexjf.net", "slave4.alexjf.net",
 #          "slave5.alexjf.net"]
-JOBHISTORY_HOST = ""
+
+# If you'll be running map reduce jobs, you should choose a host to be
+# the job tracker
+JOBTRACKER_HOST = ""
+JOBTRACKER_PORT = 8021
+
 # If you'll run MapReduce jobs, you might want to set a JobHistory server.
-# JOBHISTORY_HOST = "jobhistory.alexjf.net"
+# e.g: JOBHISTORY_HOST = "jobhistory.alexjf.net"
+JOBHISTORY_HOST = ""
+JOBHISTORY_PORT = 10020
 
 CORE_SITE_VALUES = {
     "fs.defaultFS": "hdfs://%s/" % NAMENODE_HOST,
@@ -69,7 +85,8 @@ YARN_SITE_VALUES = {
     "yarn.scheduler.maximum-allocation-vcores": 1,
     "yarn.nodemanager.resource.memory-mb": 4096,
     "yarn.nodemanager.resource.cpu-vcores": 4,
-    #"yarn.nodemanager.aux-services": "mapreduce_shuffle",
+    "yarn.log-aggregation-enable": "true",
+    "yarn.nodemanager.aux-services": "mapreduce_shuffle",
 }
 
 MAPRED_SITE_VALUES = {
@@ -98,6 +115,15 @@ seen = set()
 cleanedHosts = [host for host in hosts if host and host not in seen and not seen.add(host)]
 env.hosts = cleanedHosts
 
+if JOBTRACKER_HOST:
+    MAPRED_SITE_VALUES["mapreduce.jobtracker.address"] = "%s:%s" % \
+        (JOBTRACKER_HOST, JOBTRACKER_PORT)
+
+if JOBHISTORY_HOST:
+    MAPRED_SITE_VALUES["mapreduce.jobhistory.address"] = "%s:%s" % \
+        (JOBHISTORY_HOST, JOBHISTORY_PORT)
+
+
 # MAIN FUNCTIONS
 def installDependencies():
     for requirement in REQUIREMENTS:
@@ -125,7 +151,7 @@ def configRevertPrevious():
     revertHadoopPropertiesChange("mapred-site.xml")
 
 def setupEnvironment():
-    for var, value in ENVIRONMENT_VARIABLES.items():
+    for var, value in ENVIRONMENT_VARIABLES:
         setEnvironmentVariable(var, value)
 
 def formatHdfs():
@@ -144,7 +170,7 @@ def stop():
 
 def test():
     if env.host == RESOURCEMANAGER_HOST:
-        run("$HADOOP_PREFIX/bin/hadoop jar $HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar org.apache.hadoop.yarn.applications.distributedshell.Client --jar $HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar --shell_command date --num_containers %(numContainers)d --master_memory 1024" % 
+        run("$HADOOP_PREFIX/bin/hadoop jar $HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar org.apache.hadoop.yarn.applications.distributedshell.Client --jar $HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar --shell_command date --num_containers %(numContainers)d --master_memory 1024" %
             {"version": HADOOP_VERSION, "numContainers": len(cleanedHosts)})
 
 def testMapReduce():
@@ -165,11 +191,17 @@ def changeHadoopProperties(fileName, propertyDict):
 
     with cd(HADOOP_CONF):
         with settings(warn_only=True):
-            if run("test -f replaceHadoopProperty.py").failed:
+            import hashlib
+            replaceHadoopPropertyHash = \
+                hashlib.md5(
+                    open("replaceHadoopProperty.py", 'rb').read()
+                ).hexdigest()
+            if run("test %s = `md5sum replaceHadoopProperty.py | cut -d ' ' -f 1`"
+                   % replaceHadoopPropertyHash).failed:
                 put("replaceHadoopProperty.py", HADOOP_CONF + "/")
                 run("chmod +x replaceHadoopProperty.py")
         currentBakNumber = getLastHadoopPropertiesBackupNumber(fileName) + 1
-        run("touch '%(file)s' && cp '%(file)s' '%(file)s.bak%(bakNumber)d'" % 
+        run("touch '%(file)s' && cp '%(file)s' '%(file)s.bak%(bakNumber)d'" %
             {"file": fileName, "bakNumber": currentBakNumber})
         command = "./replaceHadoopProperty.py '%s' %s" % (fileName,
             " ".join(["%s %s" % (str(key), str(value)) for key, value in propertyDict.items()]))
@@ -184,19 +216,23 @@ def revertHadoopPropertiesChange(fileName):
             return
         # Otherwise, perform reversion
         else:
-            run("mv %(file)s.bak%(bakNumber)d %(file)s" % 
+            run("mv %(file)s.bak%(bakNumber)d %(file)s" %
                 {"file": fileName, "bakNumber": latestBakNumber})
 
 def setEnvironmentVariable(variable, value):
-    run("cp %(file)s %(file)s.bak" % {"file": ENVIRONMENT_FILE})
+    with settings(warn_only=True):
+        if run("test -f %s" % ENVIRONMENT_FILE).failed:
+            run("touch %s" % ENVIRONMENT_FILE)
+        else:
+            run("cp %(file)s %(file)s.bak" % {"file": ENVIRONMENT_FILE})
     lineNumber = run("grep -n 'export\s\+%(var)s\=' '%(file)s' | cut -d : -f 1" %
             {"var": variable, "file": ENVIRONMENT_FILE})
     try:
         lineNumber = int(lineNumber)
-        run("sed -i \"" + str(lineNumber) + "s/.*/export %(var)s\=%(val)s/\" '%(file)s'" % 
+        run("sed -i \"" + str(lineNumber) + "s@.*@export %(var)s\=%(val)s@\" '%(file)s'" %
             {"var": variable, "val": value, "file": ENVIRONMENT_FILE})
     except ValueError:
-        run("echo \"export %(var)s=%(val)s\" >> \"%(file)s\"" % 
+        run("echo \"export %(var)s=%(val)s\" >> \"%(file)s\"" %
             {"var": variable, "val": value, "file": ENVIRONMENT_FILE})
 
 def operationOnHadoopDaemons(operation):
