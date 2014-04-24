@@ -14,11 +14,11 @@ from fabric.api import run, cd, env, settings, put, sudo
 ###############################################################
 #  START OF YOUR CONFIGURATION (CHANGE FROM HERE, IF NEEDED)  #
 ###############################################################
-HADOOP_VERSION = "2.2.0"
+HADOOP_VERSION = "1.2.1"
 HADOOP_PACKAGE = "hadoop-%s" % HADOOP_VERSION
-HADOOP_PACKAGE_URL = "http://apache.mirrors.spacedump.net/hadoop/common/stable/%s.tar.gz" % HADOOP_PACKAGE
+HADOOP_PACKAGE_URL = "http://apache.crihan.fr/dist/hadoop/common/stable1/%s.tar.gz" % HADOOP_PACKAGE
 HADOOP_PREFIX = "/home/alex/Programs/%s" % HADOOP_PACKAGE
-HADOOP_CONF = os.path.join(HADOOP_PREFIX, "etc/hadoop")
+HADOOP_CONF = os.path.join(HADOOP_PREFIX, "conf")
 
 # Change this to the command you would use to install packages on the
 # remote hosts.
@@ -38,7 +38,7 @@ REQUIREMENTS = ["wget", "python", "openjdk-7-jre-headless"] # Debian/Ubuntu
 # points to an environment file that is automatically loaded in a new
 # shell session
 ENVIRONMENT_FILE_NOTAUTOLOADED = True
-ENVIRONMENT_FILE = "%s/hadoop2_env.sh" % HADOOP_PREFIX
+ENVIRONMENT_FILE = "%s/hadoop1_env.sh" % HADOOP_PREFIX
 # Should the ENVIRONMENT_VARIABLES be applies to a clean (empty) environment
 # file or should they simply be merged (only additions and updates) into the
 # existing environment file? In any case, the previous version of the file
@@ -47,11 +47,11 @@ ENVIRONMENT_FILE_CLEAN = True
 ENVIRONMENT_VARIABLES = [
     ("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk-amd64"), # Debian/Ubuntu 64 bits
     #("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk"), # Arch Linux
-    #("JAVA_HOME", "/usr/lib/jvm/java"), # CentOS
+    #("JAVA_HOME", "/usr/java/jdk1.7.0_51"), # CentOS
     ("HADOOP_PREFIX", HADOOP_PREFIX),
     ("HADOOP_HOME", r"\\$HADOOP_PREFIX"),
     ("HADOOP_COMMON_HOME", r"\\$HADOOP_PREFIX"),
-    ("HADOOP_CONF_DIR", r"\\$HADOOP_PREFIX/etc/hadoop"),
+    ("HADOOP_CONF_DIR", r"\\$HADOOP_PREFIX/conf"),
     ("HADOOP_HDFS_HOME", r"\\$HADOOP_PREFIX"),
     ("HADOOP_MAPRED_HOME", r"\\$HADOOP_PREFIX"),
     ("HADOOP_YARN_HOME", r"\\$HADOOP_PREFIX"),
@@ -61,24 +61,16 @@ ENVIRONMENT_VARIABLES = [
 ]
 
 NET_INTERFACE="eth0"
-SSH_USER = "alex"
+SSH_USER = "b.ajf"
 NAMENODE_HOST = "namenode.alexjf.net"
-RESOURCEMANAGER_HOST = "resourcemanager.alexjf.net"
+JOBTRACKER_HOST = "jobtracker.alexjf.net"
+JOBTRACKER_PORT = 9021
 SLAVE_HOSTS = ["slave%d.alexjf.net" % i for i in range(1, 6)]
 # Or equivalently
 #SLAVE_HOSTS = ["slave1.alexjf.net", "slave2.alexjf.net",
 #          "slave3.alexjf.net", "slave4.alexjf.net",
 #          "slave5.alexjf.net"]
 
-# If you'll be running map reduce jobs, you should choose a host to be
-# the job tracker
-JOBTRACKER_HOST = ""
-JOBTRACKER_PORT = 8021
-
-# If you'll run MapReduce jobs, you might want to set a JobHistory server.
-# e.g: JOBHISTORY_HOST = "jobhistory.alexjf.net"
-JOBHISTORY_HOST = ""
-JOBHISTORY_PORT = 10020
 
 # Should the configuration settings that follow be applied to clean (empty)
 # configuration files or should they simply be merged (only additions and
@@ -86,38 +78,24 @@ JOBHISTORY_PORT = 10020
 # version of the file will be backed up.
 CONFIGURATION_FILES_CLEAN = True
 CORE_SITE_VALUES = {
-    "fs.defaultFS": "hdfs://%s/" % NAMENODE_HOST,
+    "fs.default.name": "hdfs://%s:9020/" % NAMENODE_HOST,
 }
 
 HDFS_SITE_VALUES = {
-    "dfs.datanode.data.dir": "file://%s/hdfs/datanode" % HADOOP_PREFIX,
-    "dfs.namenode.name.dir": "file://%s/hdfs/namenode" % HADOOP_PREFIX,
+    "dfs.data.dir": "%s/hdfs/datanode" % HADOOP_PREFIX,
+    "dfs.name.dir": "%s/hdfs/namenode" % HADOOP_PREFIX,
+    "dfs.http.address": "0.0.0.0:50071",
+    "dfs.datanode.address": "0.0.0.0:50011",
+    "dfs.datanode.ipc.address": "0.0.0.0:50021",
+    "dfs.datanode.http.address": "0.0.0.0:50076",
     "dfs.permissions": "false",
 }
 
-YARN_SITE_VALUES = {
-    "yarn.resourcemanager.hostname": RESOURCEMANAGER_HOST,
-    "yarn.scheduler.minimum-allocation-mb": 128,
-    "yarn.scheduler.maximum-allocation-mb": 1024,
-    "yarn.scheduler.minimum-allocation-vcores": 1,
-    "yarn.scheduler.maximum-allocation-vcores": 1,
-    "yarn.nodemanager.resource.memory-mb": 4096,
-    "yarn.nodemanager.resource.cpu-vcores": 4,
-    "yarn.log-aggregation-enable": "true",
-    "yarn.nodemanager.aux-services": "mapreduce_shuffle",
-    "yarn.nodemanager.vmem-pmem-ratio": 3.1,
-}
-
 MAPRED_SITE_VALUES = {
-    "yarn.app.mapreduce.am.resource.mb": 1024,
-    "yarn.app.mapreduce.am.command-opts": "-Xmx768m",
-    "mapreduce.framework.name": "yarn",
-    "mapreduce.map.cpu.vcores": 1,
-    "mapreduce.map.memory.mb": 1024,
-    "mapreduce.map.java.opts": "-Xmx768m",
-    "mapreduce.reduce.cpu.vcores": 1,
-    "mapreduce.reduce.memory.mb": 1024,
-    "mapreduce.reduce.java.opts": "-Xmx768m",
+    "mapred.map.child.java.opts": "-Xmx768m",
+    "mapred.reduce.child.java.opts": "-Xmx768m",
+    "mapred.job.tracker.http.address": "0.0.0.0:50031",
+    "mapred.task.tracker.http.address": "0.0.0.0:50061",
 }
 
 ##############################################################
@@ -128,19 +106,15 @@ MAPRED_SITE_VALUES = {
 #  DON'T CHANGE ANYTHING BELOW (UNLESS YOU KNOW WHAT YOU'RE DOING)  #
 #####################################################################
 env.user = SSH_USER
-hosts = [NAMENODE_HOST, RESOURCEMANAGER_HOST, JOBHISTORY_HOST] + SLAVE_HOSTS
+hosts = [NAMENODE_HOST] + SLAVE_HOSTS
 seen = set()
 # Remove empty hosts and duplicates
 cleanedHosts = [host for host in hosts if host and host not in seen and not seen.add(host)]
 env.hosts = cleanedHosts
 
 if JOBTRACKER_HOST:
-    MAPRED_SITE_VALUES["mapreduce.jobtracker.address"] = "%s:%s" % \
+    MAPRED_SITE_VALUES["mapred.job.tracker"] = "%s:%s" % \
         (JOBTRACKER_HOST, JOBTRACKER_PORT)
-
-if JOBHISTORY_HOST:
-    MAPRED_SITE_VALUES["mapreduce.jobhistory.address"] = "%s:%s" % \
-        (JOBHISTORY_HOST, JOBHISTORY_PORT)
 
 # MAIN FUNCTIONS
 def forceStopEveryJava():
@@ -162,13 +136,11 @@ def install():
 def config():
     changeHadoopProperties("core-site.xml", CORE_SITE_VALUES)
     changeHadoopProperties("hdfs-site.xml", HDFS_SITE_VALUES)
-    changeHadoopProperties("yarn-site.xml", YARN_SITE_VALUES)
     changeHadoopProperties("mapred-site.xml", MAPRED_SITE_VALUES)
 
 def configRevertPrevious():
     revertHadoopPropertiesChange("core-site.xml")
     revertHadoopPropertiesChange("hdfs-site.xml")
-    revertHadoopPropertiesChange("yarn-site.xml")
     revertHadoopPropertiesChange("mapred-site.xml")
 
 def setupEnvironment():
@@ -201,7 +173,7 @@ def environmentRevertPrevious():
 
 def formatHdfs():
     if env.host == NAMENODE_HOST:
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hdfs namenode -format")
+        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop namenode -format")
 
 def setupSelfReferences():
     privateIp = run("ifconfig %s | grep 'inet\s\+' | awk '{print $2}' | cut -d':' -f2" % NET_INTERFACE).strip()
@@ -214,14 +186,9 @@ def stop():
     operationOnHadoopDaemons("stop")
 
 def test():
-    if env.host == RESOURCEMANAGER_HOST:
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop jar \\$HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar org.apache.hadoop.yarn.applications.distributedshell.Client --jar \\$HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar --shell_command date --num_containers %(numContainers)d --master_memory 1024" %
-            {"version": HADOOP_VERSION, "numContainers": len(cleanedHosts)})
-
-def testMapReduce():
-    if env.host == RESOURCEMANAGER_HOST:
+    if env.host == JOBTRACKER_HOST:
         operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop dfs -rmr out")
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop jar \\$HADOOP_PREFIX/share/hadoop/mapreduce/hadoop-mapreduce-examples-%s.jar randomwriter out" % HADOOP_VERSION)
+        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop jar \\$HADOOP_PREFIX/hadoop-examples-%s.jar randomwriter out" % HADOOP_VERSION)
 
 # HELPER FUNCTIONS
 def getLastBackupNumber(filePath):
@@ -305,21 +272,17 @@ def operationInHadoopEnvironment(operation):
 def operationOnHadoopDaemons(operation):
     # Start/Stop NameNode
     if (env.host == NAMENODE_HOST):
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/sbin/hadoop-daemon.sh %s namenode" % operation)
+        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop-daemon.sh %s namenode" % operation)
 
     # Start/Stop DataNode on all slave hosts
     if env.host in SLAVE_HOSTS:
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/sbin/hadoop-daemon.sh %s datanode" % operation)
+        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop-daemon.sh %s datanode" % operation)
 
     # Start/Stop ResourceManager
-    if (env.host == RESOURCEMANAGER_HOST):
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/sbin/yarn-daemon.sh %s resourcemanager" % operation)
+    if (env.host == JOBTRACKER_HOST):
+        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop-daemon.sh %s jobtracker" % operation)
 
     # Start/Stop NodeManager on all container hosts
     if env.host in SLAVE_HOSTS:
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/sbin/yarn-daemon.sh %s nodemanager" % operation)
-
-    # Start/Stop JobHistory daemon
-    if (env.host == JOBHISTORY_HOST):
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/sbin/mr-jobhistory-daemon.sh %s historyserver" % operation)
+        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop-daemon.sh %s tasktracker" % operation)
     run("jps")
