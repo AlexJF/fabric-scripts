@@ -84,13 +84,16 @@ REQUIREMENTS_PRE_COMMANDS = []
 # Set this to True/False depending on whether or not ENVIRONMENT_FILE
 # points to an environment file that is automatically loaded in a new
 # shell session
-ENVIRONMENT_FILE_NOTAUTOLOADED = True
-ENVIRONMENT_FILE = "/home/ubuntu/hadoop2_env.sh"
+ENVIRONMENT_FILE_NOTAUTOLOADED = False
+ENVIRONMENT_FILE = "/home/ubuntu/.bashrc"
+#ENVIRONMENT_FILE_NOTAUTOLOADED = True
+#ENVIRONMENT_FILE = "/home/ubuntu/hadoop2_env.sh"
+
 # Should the ENVIRONMENT_VARIABLES be applies to a clean (empty) environment
 # file or should they simply be merged (only additions and updates) into the
 # existing environment file? In any case, the previous version of the file
 # will be backed up.
-ENVIRONMENT_FILE_CLEAN = True
+ENVIRONMENT_FILE_CLEAN = False
 ENVIRONMENT_VARIABLES = [
     ("JAVA_HOME", "/usr/lib/jvm/java-7-oracle"), # Debian/Ubuntu 64 bits
     #("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk"), # Arch Linux
@@ -135,7 +138,7 @@ JOBHISTORY_PORT = 10020
 # file or should they simply be merged (only additions and updates) into the
 # existing environment file? In any case, the previous version of the file
 # will be backed up.
-CONFIGURATION_FILES_CLEAN = True
+CONFIGURATION_FILES_CLEAN = False
 
 HADOOP_TEMP = "/mnt/hadoop/tmp"
 HDFS_DATA_DIR = "/mnt/hdfs/datanode"
