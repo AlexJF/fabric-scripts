@@ -95,9 +95,9 @@ ENVIRONMENT_FILE = "/home/ubuntu/.bashrc"
 # will be backed up.
 ENVIRONMENT_FILE_CLEAN = False
 ENVIRONMENT_VARIABLES = [
-    ("JAVA_HOME", "/usr/lib/jvm/java-7-oracle"), # Debian/Ubuntu 64 bits
+    ("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk-amd64"), # Debian/Ubuntu 64 bits
     #("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk"), # Arch Linux
-    #("JAVA_HOME", "/usr/lib/jvm/java"), # CentOS
+    #("JAVA_HOME", "/usr/java/jdk1.7.0_51"), # CentOS
     ("HADOOP_PREFIX", HADOOP_PREFIX),
     ("HADOOP_HOME", r"\\$HADOOP_PREFIX"),
     ("HADOOP_COMMON_HOME", r"\\$HADOOP_PREFIX"),
@@ -118,6 +118,7 @@ RESOURCEMANAGER_HOST = "resourcemanager.alexjf.net"
 NAMENODE_HOST = RESOURCEMANAGER_HOST
 
 SLAVE_HOSTS = ["slave%d.alexjf.net" % i for i in range(1, 6)]
+# Or equivalently
 #SLAVE_HOSTS = ["slave1.alexjf.net", "slave2.alexjf.net",
 #          "slave3.alexjf.net", "slave4.alexjf.net",
 #          "slave5.alexjf.net"]
@@ -336,8 +337,6 @@ def setupHosts():
         run("touch privateIps")
 
         for host, privateIp in privateIps.items():
-            if host == RESOURCEMANAGER_HOST:
-                continue
             run("echo '%s' >> privateIps" % privateIp)
 
 
