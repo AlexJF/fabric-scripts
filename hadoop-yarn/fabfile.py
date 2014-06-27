@@ -505,14 +505,13 @@ def readHostsFromEC2():
     import boto.ec2
 
     global RESOURCEMANAGER_HOST, NAMENODE_HOST, JOBTRACKER_HOST, \
-        JOBHISTORY_HOST, SLAVE_HOSTS, ZOOKEEPER_HOSTS
+        JOBHISTORY_HOST, SLAVE_HOSTS
 
     RESOURCEMANAGER_HOST = None
     NAMENODE_HOST = None
     JOBTRACKER_HOST = None
     JOBHISTORY_HOST = None
     SLAVE_HOSTS = []
-    ZOOKEEPER_HOSTS = []
 
     conn = boto.ec2.connect_to_region("eu-west-1",
             aws_access_key_id=AWS_ACCESSKEY_ID,
@@ -529,9 +528,6 @@ def readHostsFromEC2():
         if "namenode" in instanceTags:
             NAMENODE_HOST = instanceHost
 
-        if "zookeeper" in instanceTags:
-            ZOOKEEPER_HOSTS.append(instanceHost)
-
         if "jobhistory" in instanceTags:
             JOBHISTORY_HOST = instanceHost
 
@@ -541,10 +537,16 @@ def readHostsFromEC2():
         if not EC2_RM_NONSLAVE or instanceHost != RESOURCEMANAGER_HOST:
             SLAVE_HOSTS.append(instanceHost)
 
-    if NAMENODE_HOST is None:
-        NAMENODE_HOST = RESOURCEMANAGER_HOST
-
     if SLAVE_HOSTS:
+        if RESOURCEMANAGER_HOST is None:
+            RESOURCEMANAGER_HOST = SLAVE_HOSTS[0]
+
+            if EC2_RM_NONSLAVE:
+                SLAVE_HOSTS.remove(0)
+
+        if NAMENODE_HOST is None:
+            NAMENODE_HOST = RESOURCEMANAGER_HOST
+
         if JOBTRACKER_HOST is None:
             JOBTRACKER_HOST = SLAVE_HOSTS[0]
 
