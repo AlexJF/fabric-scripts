@@ -10,19 +10,49 @@
 
 import os
 from fabric.api import run, cd, env, settings, put, sudo
+from fabric.decorators import runs_once, parallel
+from fabric.tasks import execute
 
 ###############################################################
 #  START OF YOUR CONFIGURATION (CHANGE FROM HERE, IF NEEDED)  #
 ###############################################################
-HADOOP_VERSION = "2.2.0"
+
+#### Generic ####
+SSH_USER = "ubuntu"
+# If you need to specify a special ssh key, do it here (e.g EC2 key)
+#env.key_filename = "~/.ssh/giraph.pem"
+
+
+#### EC2 ####
+# Is this an EC2 deployment? If so, then we'll autodiscover the right nodes.
+EC2 = False
+# In case this is an EC2 deployment, all cluster nodes must have a tag with
+# 'Cluster' as key and the following property as value.
+EC2_CLUSTER_NAME = "rtgiraph"
+# Should ResourceManager participate in job execution (also be a slave node?)
+EC2_RM_NONSLAVE = True
+# Read AWS access key details from env if available
+AWS_ACCESSKEY_ID = os.getenv("AWS_ACCESSKEY_ID", "undefined")
+AWS_ACCESSKEY_SECRET = os.getenv("AWS_ACCESSKEY_SECRET", "undefined")
+# In case the instances you use have an extra storage device which is not
+# automatically mounted, specify here the path to that device.
+EC2_INSTANCE_STORAGEDEV = None
+#EC2_INSTANCE_STORAGEDEV = "/dev/xvdb" For Ubuntu r3.xlarge instances
+
+
+#### Package Information ####
+HADOOP_VERSION = "2.4.0"
 HADOOP_PACKAGE = "hadoop-%s" % HADOOP_VERSION
-HADOOP_PACKAGE_URL = "http://apache.mirrors.spacedump.net/hadoop/common/stable/%s.tar.gz" % HADOOP_PACKAGE
-HADOOP_PREFIX = "/home/alex/Programs/%s" % HADOOP_PACKAGE
+#HADOOP_PACKAGE_URL = "http://apache.mirrors.spacedump.net/hadoop/common/stable/%s.tar.gz" % HADOOP_PACKAGE
+HADOOP_PACKAGE_URL = "http://www.whoishostingthis.com/mirrors/apache/hadoop/common/%(hadoop)s/%(hadoop)s.tar.gz" % {'hadoop': HADOOP_PACKAGE}
+HADOOP_PREFIX = "/home/ubuntu/Programs/%s" % HADOOP_PACKAGE
 HADOOP_CONF = os.path.join(HADOOP_PREFIX, "etc/hadoop")
 
+
+#### Installation information ####
 # Change this to the command you would use to install packages on the
 # remote hosts.
-PACKAGE_MANAGER_INSTALL = "apt-get install %s" # Debian/Ubuntu
+PACKAGE_MANAGER_INSTALL = "apt-get -qq install %s" # Debian/Ubuntu
 #PACKAGE_MANAGER_INSTALL = "pacman -S %s" # Arch Linux
 #PACKAGE_MANAGER_INSTALL = "yum install %s" # CentOS
 
@@ -34,18 +64,35 @@ REQUIREMENTS = ["wget", "python", "openjdk-7-jre-headless"] # Debian/Ubuntu
 #REQUIREMENTS = ["wget", "python", "jre7-openjdk-headless"] # Arch Linux
 #REQUIREMENTS = ["wget", "python", "java-1.7.0-openjdk-devel"] # CentOS
 
+# Commands to execute (in order) before installing listed requirements
+# (will run as root). Use to configure extra repos or update repos
+REQUIREMENTS_PRE_COMMANDS = []
+
+# If you want to install Oracle's Java instead of using the OpenJDK that
+# comes preinstalled with most distributions replace the previous options
+# with a variation of the following: (UBUNTU only)
+#REQUIREMENTS = ["wget", "python", "oracle-java7-installer"] # Debian/Ubuntu
+#REQUIREMENTS_PRE_COMMANDS = [
+    #"add-apt-repository ppa:webupd8team/java -y",
+    #"apt-get -qq update",
+    #"echo debconf shared/accepted-oracle-license-v1-1 select true | debconf-set-selections",
+    #"echo debconf shared/accepted-oracle-license-v1-1 seen true | debconf-set-selections",
+#]
+
+
+#### Environment ####
 # Set this to True/False depending on whether or not ENVIRONMENT_FILE
 # points to an environment file that is automatically loaded in a new
 # shell session
 ENVIRONMENT_FILE_NOTAUTOLOADED = True
-ENVIRONMENT_FILE = "%s/hadoop2_env.sh" % HADOOP_PREFIX
+ENVIRONMENT_FILE = "/home/ubuntu/hadoop2_env.sh"
 # Should the ENVIRONMENT_VARIABLES be applies to a clean (empty) environment
 # file or should they simply be merged (only additions and updates) into the
 # existing environment file? In any case, the previous version of the file
 # will be backed up.
 ENVIRONMENT_FILE_CLEAN = True
 ENVIRONMENT_VARIABLES = [
-    ("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk-amd64"), # Debian/Ubuntu 64 bits
+    ("JAVA_HOME", "/usr/lib/jvm/java-7-oracle"), # Debian/Ubuntu 64 bits
     #("JAVA_HOME", "/usr/lib/jvm/java-7-openjdk"), # Arch Linux
     #("JAVA_HOME", "/usr/lib/jvm/java"), # CentOS
     ("HADOOP_PREFIX", HADOOP_PREFIX),
@@ -60,65 +107,86 @@ ENVIRONMENT_VARIABLES = [
     ("PATH", r"\\$HADOOP_PREFIX/bin:\\$PATH"),
 ]
 
+
+#### Host data (for non-EC2 deployments) ####
+HOSTS_FILE="/etc/hosts"
 NET_INTERFACE="eth0"
-SSH_USER = "alex"
-NAMENODE_HOST = "namenode.alexjf.net"
 RESOURCEMANAGER_HOST = "resourcemanager.alexjf.net"
+NAMENODE_HOST = RESOURCEMANAGER_HOST
+
 SLAVE_HOSTS = ["slave%d.alexjf.net" % i for i in range(1, 6)]
-# Or equivalently
 #SLAVE_HOSTS = ["slave1.alexjf.net", "slave2.alexjf.net",
 #          "slave3.alexjf.net", "slave4.alexjf.net",
 #          "slave5.alexjf.net"]
 
 # If you'll be running map reduce jobs, you should choose a host to be
 # the job tracker
-JOBTRACKER_HOST = ""
+JOBTRACKER_HOST = SLAVE_HOSTS[0]
 JOBTRACKER_PORT = 8021
 
 # If you'll run MapReduce jobs, you might want to set a JobHistory server.
 # e.g: JOBHISTORY_HOST = "jobhistory.alexjf.net"
-JOBHISTORY_HOST = ""
+JOBHISTORY_HOST = JOBTRACKER_HOST
 JOBHISTORY_PORT = 10020
 
-# Should the configuration settings that follow be applied to clean (empty)
-# configuration files or should they simply be merged (only additions and
-# updates) into the existing environment file? In any case, the previous
-# version of the file will be backed up.
+
+#### Configuration ####
+# Should the configuration options be applied to a clean (empty) configuration
+# file or should they simply be merged (only additions and updates) into the
+# existing environment file? In any case, the previous version of the file
+# will be backed up.
 CONFIGURATION_FILES_CLEAN = True
-CORE_SITE_VALUES = {
-    "fs.defaultFS": "hdfs://%s/" % NAMENODE_HOST,
-}
 
-HDFS_SITE_VALUES = {
-    "dfs.datanode.data.dir": "file://%s/hdfs/datanode" % HADOOP_PREFIX,
-    "dfs.namenode.name.dir": "file://%s/hdfs/namenode" % HADOOP_PREFIX,
-    "dfs.permissions": "false",
-}
+HADOOP_TEMP = "/mnt/hadoop/tmp"
+HDFS_DATA_DIR = "/mnt/hdfs/datanode"
+HDFS_NAME_DIR = "/mnt/hdfs/namenode"
 
-YARN_SITE_VALUES = {
-    "yarn.resourcemanager.hostname": RESOURCEMANAGER_HOST,
-    "yarn.scheduler.minimum-allocation-mb": 128,
-    "yarn.scheduler.maximum-allocation-mb": 1024,
-    "yarn.scheduler.minimum-allocation-vcores": 1,
-    "yarn.scheduler.maximum-allocation-vcores": 1,
-    "yarn.nodemanager.resource.memory-mb": 4096,
-    "yarn.nodemanager.resource.cpu-vcores": 4,
-    "yarn.log-aggregation-enable": "true",
-    "yarn.nodemanager.aux-services": "mapreduce_shuffle",
-    "yarn.nodemanager.vmem-pmem-ratio": 3.1,
-}
+IMPORTANT_DIRS = [HADOOP_TEMP, HDFS_DATA_DIR, HDFS_NAME_DIR]
 
-MAPRED_SITE_VALUES = {
-    "yarn.app.mapreduce.am.resource.mb": 1024,
-    "yarn.app.mapreduce.am.command-opts": "-Xmx768m",
-    "mapreduce.framework.name": "yarn",
-    "mapreduce.map.cpu.vcores": 1,
-    "mapreduce.map.memory.mb": 1024,
-    "mapreduce.map.java.opts": "-Xmx768m",
-    "mapreduce.reduce.cpu.vcores": 1,
-    "mapreduce.reduce.memory.mb": 1024,
-    "mapreduce.reduce.java.opts": "-Xmx768m",
-}
+# Need to do this in a function so that we can rewrite the values when any
+# of the hosts change in runtime (e.g. EC2 node discovery).
+def updateHadoopSiteValues():
+    global CORE_SITE_VALUES, HDFS_SITE_VALUES, YARN_SITE_VALUES, MAPRED_SITE_VALUES
+
+    CORE_SITE_VALUES = {
+        "fs.defaultFS": "hdfs://%s/" % NAMENODE_HOST,
+        "fs.s3n.awsAccessKeyId": AWS_ACCESSKEY_ID,
+        "fs.s3n.awsSecretAccessKey": AWS_ACCESSKEY_SECRET,
+        "hadoop.tmp.dir": HADOOP_TEMP
+    }
+
+    HDFS_SITE_VALUES = {
+        "dfs.datanode.data.dir": "file://%s" % HDFS_DATA_DIR,
+        "dfs.namenode.name.dir": "file://%s" % HDFS_NAME_DIR,
+        "dfs.permissions": "false",
+    }
+
+    YARN_SITE_VALUES = {
+        "yarn.resourcemanager.hostname": RESOURCEMANAGER_HOST,
+        "yarn.scheduler.minimum-allocation-mb": 128,
+        "yarn.scheduler.maximum-allocation-mb": 1024,
+        "yarn.scheduler.minimum-allocation-vcores": 1,
+        "yarn.scheduler.maximum-allocation-vcores": 2,
+        "yarn.nodemanager.resource.memory-mb": 4096,
+        "yarn.nodemanager.resource.cpu-vcores": 4,
+        "yarn.log-aggregation-enable": "true",
+        "yarn.nodemanager.aux-services": "mapreduce_shuffle",
+        "yarn.nodemanager.vmem-pmem-ratio": 3.1,
+        "yarn.nodemanager.remote-app-log-dir": os.path.join(HADOOP_TEMP, "logs"),
+        "yarn.nodemanager.log-dirs": os.path.join(HADOOP_TEMP, "userlogs"),
+    }
+
+    MAPRED_SITE_VALUES = {
+        "yarn.app.mapreduce.am.resource.mb": 1024,
+        "yarn.app.mapreduce.am.command-opts": "-Xmx768m",
+        "mapreduce.framework.name": "yarn",
+        "mapreduce.map.cpu.vcores": 1,
+        "mapreduce.map.memory.mb": 1024,
+        "mapreduce.map.java.opts": "-Xmx768m",
+        "mapreduce.reduce.cpu.vcores": 1,
+        "mapreduce.reduce.memory.mb": 1024,
+        "mapreduce.reduce.java.opts": "-Xmx768m",
+    }
 
 ##############################################################
 #  END OF YOUR CONFIGURATION (CHANGE UNTIL HERE, IF NEEDED)  #
@@ -127,28 +195,74 @@ MAPRED_SITE_VALUES = {
 #####################################################################
 #  DON'T CHANGE ANYTHING BELOW (UNLESS YOU KNOW WHAT YOU'RE DOING)  #
 #####################################################################
-env.user = SSH_USER
-hosts = [NAMENODE_HOST, RESOURCEMANAGER_HOST, JOBHISTORY_HOST] + SLAVE_HOSTS
-seen = set()
-# Remove empty hosts and duplicates
-cleanedHosts = [host for host in hosts if host and host not in seen and not seen.add(host)]
-env.hosts = cleanedHosts
+CORE_SITE_VALUES = {}
+HDFS_SITE_VALUES = {}
+YARN_SITE_VALUES = {}
+MAPRED_SITE_VALUES = {}
 
-if JOBTRACKER_HOST:
-    MAPRED_SITE_VALUES["mapreduce.jobtracker.address"] = "%s:%s" % \
-        (JOBTRACKER_HOST, JOBTRACKER_PORT)
+def bootstrapFabric():
+    if EC2:
+        readHostsFromEC2()
 
-if JOBHISTORY_HOST:
-    MAPRED_SITE_VALUES["mapreduce.jobhistory.address"] = "%s:%s" % \
-        (JOBHISTORY_HOST, JOBHISTORY_PORT)
+    updateHadoopSiteValues()
+
+    env.user = SSH_USER
+    hosts = [NAMENODE_HOST, RESOURCEMANAGER_HOST, JOBHISTORY_HOST] + SLAVE_HOSTS
+    seen = set()
+    # Remove empty hosts and duplicates
+    cleanedHosts = [host for host in hosts if host and host not in seen and not seen.add(host)]
+    env.hosts = cleanedHosts
+
+    if JOBTRACKER_HOST:
+        MAPRED_SITE_VALUES["mapreduce.jobtracker.address"] = "%s:%s" % \
+            (JOBTRACKER_HOST, JOBTRACKER_PORT)
+
+    if JOBHISTORY_HOST:
+        MAPRED_SITE_VALUES["mapreduce.jobhistory.address"] = "%s:%s" % \
+            (JOBHISTORY_HOST, JOBHISTORY_PORT)
+
 
 # MAIN FUNCTIONS
 def forceStopEveryJava():
     run("jps | grep -vi jps | cut -d ' ' -f 1 | xargs -L1 -r kill")
 
+
+@runs_once
+def debugHosts():
+    print("Resource Manager: {}".format(RESOURCEMANAGER_HOST))
+    print("Name node: {}".format(NAMENODE_HOST))
+    print("Job Tracker: {}".format(JOBTRACKER_HOST))
+    print("Job History: {}".format(JOBHISTORY_HOST))
+    print("Slaves: {}".format(SLAVE_HOSTS))
+
+
+def bootstrap():
+    with settings(warn_only=True):
+        if EC2_INSTANCE_STORAGEDEV and run("mountpoint /mnt").failed:
+            sudo("mkfs.ext4 %s" % EC2_INSTANCE_STORAGEDEV)
+            sudo("mount %s /mnt" % EC2_INSTANCE_STORAGEDEV)
+            sudo("chmod 0777 /mnt")
+            sudo("rm -rf /tmp/hadoop-ubuntu")
+    ensureImportantDirectoriesExist()
+    installDependencies()
+    install()
+    setupEnvironment()
+    config()
+    setupHosts()
+    formatHdfs()
+
+
+def ensureImportantDirectoriesExist():
+    for importantDir in IMPORTANT_DIRS:
+        ensureDirectoryExists(importantDir)
+
+
 def installDependencies():
+    for command in REQUIREMENTS_PRE_COMMANDS:
+        sudo(command)
     for requirement in REQUIREMENTS:
         sudo(PACKAGE_MANAGER_INSTALL % requirement)
+
 
 def install():
     installDirectory = os.path.dirname(HADOOP_PREFIX)
@@ -159,17 +273,20 @@ def install():
                 run("wget -O %s.tar.gz %s" % (HADOOP_PACKAGE, HADOOP_PACKAGE_URL))
         run("tar --overwrite -xf %s.tar.gz" % HADOOP_PACKAGE)
 
+
 def config():
     changeHadoopProperties("core-site.xml", CORE_SITE_VALUES)
     changeHadoopProperties("hdfs-site.xml", HDFS_SITE_VALUES)
     changeHadoopProperties("yarn-site.xml", YARN_SITE_VALUES)
     changeHadoopProperties("mapred-site.xml", MAPRED_SITE_VALUES)
 
+
 def configRevertPrevious():
     revertHadoopPropertiesChange("core-site.xml")
     revertHadoopPropertiesChange("hdfs-site.xml")
     revertHadoopPropertiesChange("yarn-site.xml")
     revertHadoopPropertiesChange("mapred-site.xml")
+
 
 def setupEnvironment():
     with settings(warn_only=True):
@@ -196,34 +313,88 @@ def setupEnvironment():
             run("echo \"export %(var)s=%(val)s\" >> \"%(file)s\"" %
                 {"var": variable, "val": value, "file": ENVIRONMENT_FILE})
 
+
 def environmentRevertPrevious():
     revertBackup(ENVIRONMENT_FILE)
+
 
 def formatHdfs():
     if env.host == NAMENODE_HOST:
         operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hdfs namenode -format")
 
-def setupSelfReferences():
-    privateIp = run("ifconfig %s | grep 'inet\s\+' | awk '{print $2}' | cut -d':' -f2" % NET_INTERFACE).strip()
-    sudo("echo '" + privateIp + " " + env.host + "' >> /etc/hosts")
+
+@runs_once
+def setupHosts():
+    privateIps = execute(getPrivateIp)
+    execute(updateHosts, privateIps)
+
+    if env.host == RESOURCEMANAGER_HOST:
+        run("rm -f privateIps")
+        run("touch privateIps")
+
+        for host, privateIp in privateIps.items():
+            if host == RESOURCEMANAGER_HOST:
+                continue
+            run("echo '%s' >> privateIps" % privateIp)
+
 
 def start():
     operationOnHadoopDaemons("start")
 
+
 def stop():
     operationOnHadoopDaemons("stop")
+
 
 def test():
     if env.host == RESOURCEMANAGER_HOST:
         operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop jar \\$HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar org.apache.hadoop.yarn.applications.distributedshell.Client --jar \\$HADOOP_PREFIX/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-%(version)s.jar --shell_command date --num_containers %(numContainers)d --master_memory 1024" %
-            {"version": HADOOP_VERSION, "numContainers": len(cleanedHosts)})
+            {"version": HADOOP_VERSION, "numContainers": len(SLAVE_HOSTS)})
+
 
 def testMapReduce():
     if env.host == RESOURCEMANAGER_HOST:
-        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop dfs -rmr out")
+        operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop dfs -rm -f -r out")
         operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/bin/hadoop jar \\$HADOOP_PREFIX/share/hadoop/mapreduce/hadoop-mapreduce-examples-%s.jar randomwriter out" % HADOOP_VERSION)
 
+
 # HELPER FUNCTIONS
+def ensureDirectoryExists(directory):
+    with settings(warn_only=True):
+        if run("test -d %s" % directory).failed:
+            run("mkdir -p %s" % directory)
+
+
+@parallel
+def getPrivateIp():
+    if not EC2:
+        return run("ifconfig %s | grep 'inet\s\+' | awk '{print $2}' | cut -d':' -f2" % NET_INTERFACE).strip()
+    else:
+        return run("wget -qO- http://instance-data/latest/meta-data/local-ipv4")
+
+
+@parallel
+def updateHosts(privateIps):
+    with settings(warn_only=True):
+        if not run("test -f %s" % HOSTS_FILE).failed:
+            currentBakNumber = getLastBackupNumber(HOSTS_FILE) + 1
+            sudo("cp %(file)s %(file)s.bak%(bakNumber)d" %
+                {"file": HOSTS_FILE, "bakNumber": currentBakNumber})
+
+    sudo("touch %s" % HOSTS_FILE)
+
+    for host, privateIp in privateIps.items():
+        lineNumber = run("grep -n '^%(host)s' '%(file)s' | cut -d : -f 1" %
+                {"host": host, "file": HOSTS_FILE})
+        try:
+            lineNumber = int(lineNumber)
+            sudo("sed -i \"" + str(lineNumber) + "s@.*@%(host)s %(ip)s@\" '%(file)s'" %
+                {"host": host, "ip": privateIp, "file": HOSTS_FILE})
+        except ValueError:
+            sudo("echo \"%(host)s %(ip)s\" >> \"%(file)s\"" %
+                {"host": host, "ip": privateIp, "file": HOSTS_FILE})
+
+
 def getLastBackupNumber(filePath):
     dirName = os.path.dirname(filePath)
     fileName = os.path.basename(filePath)
@@ -234,6 +405,7 @@ def getLastBackupNumber(filePath):
         if latestBak:
             latestBakNumber = int(latestBak[len(fileName) + 4:])
         return latestBakNumber
+
 
 def changeHadoopProperties(fileName, propertyDict):
     if not fileName or not propertyDict:
@@ -268,6 +440,7 @@ def changeHadoopProperties(fileName, propertyDict):
             " ".join(["%s %s" % (str(key), str(value)) for key, value in propertyDict.items()]))
         run(command)
 
+
 def revertBackup(fileName):
     dirName = os.path.dirname(fileName)
 
@@ -282,8 +455,10 @@ def revertBackup(fileName):
             run("mv %(file)s.bak%(bakNumber)d %(file)s" %
                 {"file": fileName, "bakNumber": latestBakNumber})
 
+
 def revertHadoopPropertiesChange(fileName):
     revertBackup(os.path.join(HADOOP_CONF, fileName))
+
 
 def operationInHadoopEnvironment(operation):
     with cd(HADOOP_PREFIX):
@@ -301,6 +476,7 @@ def operationInHadoopEnvironment(operation):
                     run("chmod +x executeInHadoopEnv.sh")
             command = ("./executeInHadoopEnv.sh %s " % ENVIRONMENT_FILE) + command
         run(command)
+
 
 def operationOnHadoopDaemons(operation):
     # Start/Stop NameNode
@@ -323,3 +499,56 @@ def operationOnHadoopDaemons(operation):
     if (env.host == JOBHISTORY_HOST):
         operationInHadoopEnvironment(r"\\$HADOOP_PREFIX/sbin/mr-jobhistory-daemon.sh %s historyserver" % operation)
     run("jps")
+
+
+def readHostsFromEC2():
+    import boto.ec2
+
+    global RESOURCEMANAGER_HOST, NAMENODE_HOST, JOBTRACKER_HOST, \
+        JOBHISTORY_HOST, SLAVE_HOSTS, ZOOKEEPER_HOSTS
+
+    RESOURCEMANAGER_HOST = None
+    NAMENODE_HOST = None
+    JOBTRACKER_HOST = None
+    JOBHISTORY_HOST = None
+    SLAVE_HOSTS = []
+    ZOOKEEPER_HOSTS = []
+
+    conn = boto.ec2.connect_to_region("eu-west-1",
+            aws_access_key_id=AWS_ACCESSKEY_ID,
+            aws_secret_access_key=AWS_ACCESSKEY_SECRET)
+    instances = conn.get_only_instances(filters={'tag:Cluster': 'rtgiraph'})
+
+    for instance in instances:
+        instanceTags = instance.tags
+        instanceHost = instance.public_dns_name
+
+        if "resourcemanager" in instanceTags:
+            RESOURCEMANAGER_HOST = instanceHost
+
+        if "namenode" in instanceTags:
+            NAMENODE_HOST = instanceHost
+
+        if "zookeeper" in instanceTags:
+            ZOOKEEPER_HOSTS.append(instanceHost)
+
+        if "jobhistory" in instanceTags:
+            JOBHISTORY_HOST = instanceHost
+
+        if "jobtracker" in instanceTags:
+            JOBTRACKER_HOST = instanceHost
+
+        if not EC2_RM_NONSLAVE or instanceHost != RESOURCEMANAGER_HOST:
+            SLAVE_HOSTS.append(instanceHost)
+
+    if NAMENODE_HOST is None:
+        NAMENODE_HOST = RESOURCEMANAGER_HOST
+
+    if SLAVE_HOSTS:
+        if JOBTRACKER_HOST is None:
+            JOBTRACKER_HOST = SLAVE_HOSTS[0]
+
+        if JOBHISTORY_HOST is None:
+            JOBHISTORY_HOST = SLAVE_HOSTS[0]
+
+bootstrapFabric()
