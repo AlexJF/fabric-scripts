@@ -26,6 +26,7 @@ SSH_USER = "ubuntu"
 #### EC2 ####
 # Is this an EC2 deployment? If so, then we'll autodiscover the right nodes.
 EC2 = False
+EC2_REGION = "eu-west-1"
 # In case this is an EC2 deployment, all cluster nodes must have a tag with
 # 'Cluster' as key and the following property as value.
 EC2_CLUSTER_NAME = "rtgiraph"
@@ -515,10 +516,10 @@ def readHostsFromEC2():
     JOBHISTORY_HOST = None
     SLAVE_HOSTS = []
 
-    conn = boto.ec2.connect_to_region("eu-west-1",
+    conn = boto.ec2.connect_to_region(EC2_REGION,
             aws_access_key_id=AWS_ACCESSKEY_ID,
             aws_secret_access_key=AWS_ACCESSKEY_SECRET)
-    instances = conn.get_only_instances(filters={'tag:Cluster': 'rtgiraph'})
+    instances = conn.get_only_instances(filters={'tag:Cluster': EC2_CLUSTER_NAME})
 
     for instance in instances:
         instanceTags = instance.tags
