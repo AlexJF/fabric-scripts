@@ -185,7 +185,7 @@ def bootstrapFabric():
     env.hosts = cleanedHosts
 
     if JOBTRACKER_HOST:
-        MAPRED_SITE_VALUES["mapreduce.jobtracker.address"] = "%s:%s" % \
+        MAPRED_SITE_VALUES["mapred.job.tracker"] = "%s:%s" % \
             (JOBTRACKER_HOST, JOBTRACKER_PORT)
 
 
