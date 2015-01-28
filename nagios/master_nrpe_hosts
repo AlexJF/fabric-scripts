@@ -1,0 +1,16 @@
+define host {
+name linux-box
+use generic-host
+check_period 24x7
+check_interval 1
+retry_interval 1
+max_check_attempts 10
+check_command check-host-alive
+notification_period 24x7
+notification_interval 30
+contact_groups admins
+register 0
+}
+
+# Actual hosts will be automatically added below by the fab script
+# referencing the above configuration
