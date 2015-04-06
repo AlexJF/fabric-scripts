@@ -339,7 +339,7 @@ def updateHosts(privateIps):
 
     for host, privateIp in privateIps.items():
         lineNumber = run("grep -n '^%(ip)s' '%(file)s' | cut -d : -f 1" %
-                {"host": host, "file": HOSTS_FILE})
+                {"ip": privateIp, "file": HOSTS_FILE})
         try:
             lineNumber = int(lineNumber)
             sudo("sed -i \"" + str(lineNumber) + "s@.*@%(ip)s %(host)s@\" '%(file)s'" %
