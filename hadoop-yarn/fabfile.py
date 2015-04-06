@@ -387,14 +387,14 @@ def updateHosts(privateIps):
     sudo("touch %s" % HOSTS_FILE)
 
     for host, privateIp in privateIps.items():
-        lineNumber = run("grep -n '^%(host)s' '%(file)s' | cut -d : -f 1" %
+        lineNumber = run("grep -n '^%(ip)s' '%(file)s' | cut -d : -f 1" %
                 {"host": host, "file": HOSTS_FILE})
         try:
             lineNumber = int(lineNumber)
-            sudo("sed -i \"" + str(lineNumber) + "s@.*@%(host)s %(ip)s@\" '%(file)s'" %
+            sudo("sed -i \"" + str(lineNumber) + "s@.*@%(ip)s %(host)s@\" '%(file)s'" %
                 {"host": host, "ip": privateIp, "file": HOSTS_FILE})
         except ValueError:
-            sudo("echo \"%(host)s %(ip)s\" >> \"%(file)s\"" %
+            sudo("echo \"%(ip)s %(host)s\" >> \"%(file)s\"" %
                 {"host": host, "ip": privateIp, "file": HOSTS_FILE})
 
 

@@ -13,6 +13,8 @@ from fabric.api import run, cd, env, settings, put, sudo
 from fabric.decorators import runs_once, parallel
 from fabric.tasks import execute
 
+env.password = "password"
+
 # Packages info
 NAGIOS_CORE_VERSION = "4.0.8"
 NAGIOS_CORE_PACKAGE = "nagios-{}".format(NAGIOS_CORE_VERSION)
@@ -32,14 +34,14 @@ PNP4NAGIOS_URL = "http://liquidtelecom.dl.sourceforge.net/project/pnp4nagios/PNP
 
 # Cluster info
 CLUSTER_MASTER = "grafos01"
-CLUSTER_WORKERS = ["grafos{:02d}".format(x) for x in range(1, 11)]
-#CLUSTER_WORKERS = ["grafos01"]
+CLUSTER_WORKERS = ["grafos01", "grafos02", "grafos03"]
+#CLUSTER_WORKERS = ["grafos{:02d}".format(x) for x in range(1, 11)]
 
 # Nagios info
 NAGIOS_USER = "nagios"
 NAGIOS_GROUP = "nagcmd"
 NAGIOS_HTTP_USER = "nagiosadmin"
-NAGIOS_HTTP_PASSWORD = "PASSWORD"
+NAGIOS_HTTP_PASSWORD = "grafos"
 
 # NRPE info
 NRPE_SERVICES = [
@@ -57,6 +59,7 @@ NET_INTERFACE = "eth0"
 SENDMAIL_BIN = "/usr/bin/sendmail"
 
 APACHE2_CONFD = "/etc/apache2/conf.d"
+#APACHE2_CONFD = "/etc/apache/sites-enabled" # Ubuntu 14.04
 APACHE2_DAEMON = "apache2"
 
 PREINSTALL_COMMANDS = [
@@ -69,19 +72,21 @@ DEPENDENCIES = [
     "wget",
     "build-essential",
     "apache2",
+    "apache2-utils",
     "php5-gd",
-    "libgd2-xpm",
     "libgd2-xpm-dev",
     "libapache2-mod-php5",
     "xinetd",
     "sysstat",
     "rrdtool",
-    "librrds-perl"
+    "librrds-perl",
+    "libssl-dev",
 ]
 
 POSTINSTALL_COMMANDS = [
-    "a2enmod rewrite"
-    "service apache2 restart"
+    "a2enmod rewrite",
+    "a2enmod cgi",
+    "service {0} restart".format(APACHE2_DAEMON)
 ]
 
 def bootstrapFabric():
@@ -181,10 +186,9 @@ def installNRPE():
             sudo_with_settings("make install-daemon-config")
             sudo_with_settings("make install-xinetd")
             addLinesToFile("/etc/services", ["nrpe\t5666/tcp\tNRPE"])
-            configureNRPESlaves()
         if env.host == CLUSTER_MASTER:
             sudo_with_settings("make install-daemon")
-            configureNRPEMaster()
+    updateNPREConfig()
 
 
 def installPNP4Nagios():
@@ -200,7 +204,7 @@ def installPNP4Nagios():
         run_with_settings("./configure")
         run_with_settings("make all")
         sudo_with_settings("make fullinstall")
-        sudo("service apache2 restart")
+        sudo_with_settings("service {APACHE2_DAEMON} restart")
 
     configurePNP4Nagios()
 
@@ -210,18 +214,22 @@ def configurePNP4Nagios():
         return
 
     addLinesToFile("/usr/local/nagios/etc/nagios.cfg", [
-        r"process_performance_data=1",
-        r"service_perfdata_file=/usr/local/pnp4nagios/var/service-perfdata",
-        r"service_perfdata_file_template=DATATYPE::SERVICEPERFDATA\tTIMET::$TIMET$\tHOSTNAME::$HOSTNAME$\tSERVICEDESC::$SERVICEDESC$\tSERVICEPERFDATA::$SERVICEPERFDATA$\tSERVICECHECKCOMMAND::$SERVICECHECKCOMMAND$\tHOSTSTATE::$HOSTSTATE$\tHOSTSTATETYPE::$HOSTSTATETYPE$\tSERVICESTATE::$SERVICESTATE$\tSERVICESTATETYPE::$SERVICESTATETYPE$",
-        r"service_perfdata_file_mode=a",
-        r"service_perfdata_file_processing_interval=15",
-        r"service_perfdata_file_processing_command=process-service-perfdata-file",
-
-        r"host_perfdata_file=/usr/local/pnp4nagios/var/host-perfdata",
-        r"host_perfdata_file_template=DATATYPE::HOSTPERFDATA\tTIMET::$TIMET$\tHOSTNAME::$HOSTNAME$\tHOSTPERFDATA::$HOSTPERFDATA$\tHOSTCHECKCOMMAND::$HOSTCHECKCOMMAND$\tHOSTSTATE::$HOSTSTATE$\tHOSTSTATETYPE::$HOSTSTATETYPE$",
-        r"host_perfdata_file_mode=a",
-        r"host_perfdata_file_processing_interval=15",
-        r"host_perfdata_file_processing_command=process-host-perfdata-file",
+            r"process_performance_data=1",
+            r"service_perfdata_file=/usr/local/pnp4nagios/var/service-perfdata",
+            r"service_perfdata_file_template=DATATYPE::SERVICEPERFDATA\tTIMET::$TIMET$\tHOSTNAME::$HOSTNAME$\tSERVICEDESC::$SERVICEDESC$\tSERVICEPERFDATA::$SERVICEPERFDATA$\tSERVICECHECKCOMMAND::$SERVICECHECKCOMMAND$\tHOSTSTATE::$HOSTSTATE$\tHOSTSTATETYPE::$HOSTSTATETYPE$\tSERVICESTATE::$SERVICESTATE$\tSERVICESTATETYPE::$SERVICESTATETYPE$",
+            r"service_perfdata_file_mode=a",
+            r"service_perfdata_file_processing_interval=15",
+            r"service_perfdata_file_processing_command=process-service-perfdata-file",
+            r"host_perfdata_file=/usr/local/pnp4nagios/var/host-perfdata",
+            r"host_perfdata_file_template=DATATYPE::HOSTPERFDATA\tTIMET::$TIMET$\tHOSTNAME::$HOSTNAME$\tHOSTPERFDATA::$HOSTPERFDATA$\tHOSTCHECKCOMMAND::$HOSTCHECKCOMMAND$\tHOSTSTATE::$HOSTSTATE$\tHOSTSTATETYPE::$HOSTSTATETYPE$",
+            r"host_perfdata_file_mode=a",
+            r"host_perfdata_file_processing_interval=15",
+            r"host_perfdata_file_processing_command=process-host-perfdata-file",
+            r"process_performance_data=1",
+            r"service_perfdata_file_mode=a",
+            r"service_perfdata_file_processing_command=process-service-perfdata-file",
+            r"host_perfdata_file_mode=a",
+            r"host_perfdata_file_processing_command=process-host-perfdata-file",
         ])
 
 
@@ -337,7 +345,7 @@ def addLinesToFile(cfg_file, lines):
     sudo("touch %s" % cfg_file)
 
     for line in lines:
-        lineNumber = sudo("grep -n -F '{line}' '{file}' | cut -d : -f 1".format(line=line, file=cfg_file))
+        lineNumber = sudo("grep -n -F -x '{line}' '{file}' | cut -d : -f 1".format(line=line, file=cfg_file))
         try:
             lineNumber = int(lineNumber)
             # Line already exists

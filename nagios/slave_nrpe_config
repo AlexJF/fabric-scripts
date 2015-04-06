@@ -218,7 +218,7 @@ command[check_cpu]=/usr/local/nagios/libexec/check_linux_stats.pl -C -w 99 -c 10
 # Check open files
 command[check_open_file]=/usr/local/nagios/libexec/check_linux_stats.pl -F -w 10000,250000 -c 15000,350000
 # Check io disk on device sda1, sda3 and sda4
-command[check_io]=/usr/local/nagios/libexec/check_linux_stats.pl -I -w 2000,600 -c 3000,800 -p xvda1,xvdb -s 5
+command[check_io]=/usr/local/nagios/libexec/check_linux_stats.pl -I -w 2000,600 -c 3000,800 -p sda -s 5
 # Check processes
 command[check_procs]=/usr/local/nagios/libexec/check_linux_stats.pl -P -w 1000 -c 2000
 # Check network usage on eth0

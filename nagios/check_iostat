@@ -1,78 +1,276 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Version 0.0.2 - Jan/2009
 # Changes: added device verification
 #
 # by Thiago Varela - thiago@iplenix.com
+#
+# --------------------------------------
+#
+# Version 0.0.3 - Dec/2011
+# Changes:
+# - changed values from bytes to mbytes
+# - fixed bug to get traffic data without comma but point
+# - current values are displayed now, not average values (first run of iostat)
+#
+# by Philipp Niedziela - pn@pn-it.com
+#
+# Version 0.0.4 - April/2014
+# Changes:
+# - Allow Empty warn/crit levels
+# - Can check I/O, WAIT Time, or Queue
+#
+# by Warren Turner
 
 iostat=`which iostat 2>/dev/null`
 bc=`which bc 2>/dev/null`
 
 function help {
-echo -e "\n\tThis plugin shows the I/O usage of the specified disk, using the iostat external program.\n\tIt prints three statistics: Transactions per second (tps), Kilobytes per second\n\tread from the disk (KB_read/s) and and written to the disk (KB_written/s)\n\n$0:\n\t-d <disk>\t\tDevice to be checked (without the full path, eg. sda)\n\t-c <tps>,<read>,<wrtn>\tSets the CRITICAL level for tps, KB_read/s and KB_written/s, respectively\n\t-w <tps>,<read>,<wrtn>\tSets the WARNING level for tps, KB_read/s and KB_written/s, respectively\n"
-	exit -1
+echo -e "
+Usage:
+
+-d =
+--Device to be checked. Example: \"-d sda\"
+
+-i = IO Check Mode
+--Checks Total Disk IO, Read IO/Sec, Write IO/Sec, Bytes Read/Sec, Bytes Written/Sec
+--warning/critical = Total IO,Read IO/Sec,Write IO/Sec,Bytes Read/Sec,Bytes Written/Sec
+
+-q = Queue Mode
+--Checks Disk Queue Lengths
+--warning/critial = Total Queue Length,Read Queue Length,Write Queue Length
+
+-W = Wait Time Mode
+--Check the time for I/O requests issued to the device to be served. This includes the time spent by the requests in queue and the time spent servicing them.
+--warning/critical = Avg I/O Wait Time/ms,Read Wait Time/ms,Write Wait Time/ms
+
+"
+exit -1
 }
 
 # Ensuring we have the needed tools:
 ( [ ! -f $iostat ] || [ ! -f $bc ] ) && \
-	( echo "ERROR: You must have iostat and bc installed in order to run this plugin" && exit -1 )
+  ( echo "ERROR: You must have iostat and bc installed in order to run this plugin\n\tuse: apt-get install systat bc\n" && exit -1 )
+
+io=0
+queue=0
+waittime=0
+msg="OK"
 
 # Getting parameters:
-while getopts "d:w:c:h" OPT; do
-	case $OPT in
-		"d") disk=$OPTARG;;
-		"w") warning=$OPTARG;;
-		"c") critical=$OPTARG;;
-		"h") help;;
-	esac
+while getopts "d:w:c:io:qu:Wt:h" OPT; do
+  case $OPT in
+    "d") disk=$OPTARG;;
+    "w") warning=$OPTARG;;
+    "c") critical=$OPTARG;;
+    "i") io=1;;
+    "q") queue=1;;
+    "W") waittime=1;;
+    "h") help;;
+  esac
 done
 
-# Adjusting the three warn and crit levels:
-crit_tps=`echo $critical | cut -d, -f1`
-crit_read=`echo $critical | cut -d, -f2`
-crit_written=`echo $critical | cut -d, -f3`
-
-warn_tps=`echo $warning | cut -d, -f1`
-warn_read=`echo $warning | cut -d, -f2`
-warn_written=`echo $warning | cut -d, -f3`
-
-
-# Checking parameters:
-[ ! -b "/dev/$disk" ] && echo "ERROR: Device incorrectly specified" && help
-
-( [ "$warn_tps" == "" ] || [ "$warn_read" == "" ] || [ "$warn_written" == "" ] || \
-  [ "$crit_tps" == "" ] || [ "$crit_read" == "" ] || [ "$crit_written" == "" ] ) &&
-	echo "ERROR: You must specify all warning and critical levels" && help
-
-( [[ "$warn_tps" -ge  "$crit_tps" ]] || \
-  [[ "$warn_read" -ge  "$crit_read" ]] || \
-  [[ "$warn_written" -ge  "$crit_written" ]] ) && \
-  echo "ERROR: critical levels must be highter than warning levels" && help
-
-
-# Doing the actual check:
-tps=`$iostat $disk | grep $disk | awk '{print $2}'`
-kbread=`$iostat $disk | grep $disk | awk '{print $3}'`
-kbwritten=`$iostat $disk | grep $disk | awk '{print $4}'`
-
-
-# Comparing the result and setting the correct level:
-if ( [ "`echo "$tps >= $crit_tps" | bc`" == "1" ] || [ "`echo "$kbread >= $crit_read" | bc`" == "1" ] || \
-     [ "`echo "$kbwritten >= $crit_written" | bc`" == "1" ] ); then
-        msg="CRITICAL"
-        status=2
-else if ( [ "`echo "$tps >= $warn_tps" | bc`" == "1" ] || [ "`echo "$kbread >= $warn_read" | bc`" == "1" ] || \
-          [ "`echo "$kbwritten >= $warn_written" | bc`" == "1" ] ); then
-        	msg="WARNING"
-        	status=1
-     else
-        msg="OK"
-        status=0
-     fi
+# Autofill if parameters are empty
+if [ -z "$disk" ]
+then disk=sda
 fi
 
-# Printing the results:
-echo "$msg - I/O stats tps=$tps KB_read/s=$kbread KB_written/s=$kbwritten | 'tps'=$tps; 'KB_read/s'=$kbread; 'KB_written/s'=$kbwritten;"
+if [ -z "$warning" ]
+then warning=99999
+fi
 
-# Bye!
-exit $status
+if [ -z "$critical" ]
+then critical=99999
+fi
+
+
+# Adjusting the warn and crit levels:
+crit_total=`echo $critical | cut -d, -f1`
+crit_read=`echo $critical | cut -d, -f2`
+crit_written=`echo $critical | cut -d, -f3`
+crit_kbytes_read=`echo $critical | cut -d, -f4`
+crit_kbytes_written=`echo $critical | cut -d, -f5`
+
+warn_total=`echo $warning | cut -d, -f1`
+warn_read=`echo $warning | cut -d, -f2`
+warn_written=`echo $warning | cut -d, -f3`
+warn_kbytes_read=`echo $warning | cut -d, -f4`
+warn_kbytes_written=`echo $warning | cut -d, -f5`
+
+
+# # Checking parameters:
+# [ ! -b "/dev/$disk" ] && echo "ERROR: Device incorrectly specified" && help
+
+# ( [ "$warn_total" == "" ] || [ "$warn_read" == "" ] || [ "$warn_written" == "" ] || \
+  # [ "$crit_total" == "" ] || [ "$crit_read" == "" ] || [ "$crit_written" == "" ] ) &&
+  # echo "ERROR: You must specify all warning and critical levels" && help
+
+# ( [[ "$warn_total" -ge "$crit_total" ]] || \
+  # [[ "$warn_read" -ge "$crit_read" ]] || \
+  # [[ "$warn_written" -ge "$crit_written" ]] ) && \
+  # echo "ERROR: critical levels must be highter than warning levels" && help
+
+
+# iostat parameters:
+# -m: megabytes
+# -k: kilobytes
+# first run of iostat shows statistics since last reboot, second one shows current vaules of hdd
+
+# Doing the actual checks:
+
+
+## IO Check ##
+if [ "$io" == "1" ]
+then
+  total=`$iostat $disk -y -k -d 2 1 | grep $disk | awk '{print $2}'`
+  read_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $4}'`
+  written_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $5}'`
+  kbytes_read_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $6}'`
+  kbytes_written_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $7}'`
+
+
+  # IO # "Converting" values to float (string replace , with .)
+  total=${total/,/.}
+  read_sec=${read_sec/,/.}
+  written_sec=${written_sec/,/.}
+  kbytes_read_sec=${kbytes_read_sec/,/.}
+  kbytes_written_sec=${kbytes_written_sec/,/.}
+
+
+  # IO # Comparing the result and setting the correct level:
+
+  if [ "$warn_total" -ne "99999" ]
+  then
+    if ( [ "`echo "$total >= $warn_total" | bc`" == "1" ] || [ "`echo "$read_sec >= $warn_read" | bc`" == "1" ] || \
+      [ "`echo "$written_sec >= $warn_written" | bc`" == "1" ] || [ "`echo "$kbytes_read_sec >= $warn_kbytes_read" | bc -q`" == "1" ] ||
+      [ "`echo "$kbytes_written_sec >= $warn_kybtes_written" | bc`" == "1" ] )
+  then
+    msg="WARNING"
+    status=1
+  fi
+fi
+
+if [ "$crit_total" -ne "99999" ]
+then
+  if ( [ "`echo "$total >= $crit_total" | bc`" == "1" ] || [ "`echo "$read_sec >= $crit_read" | bc -q`" == "1" ] || \
+    [ "`echo "$written_sec >= $crit_written" | bc`" == "1" ] || [ "`echo "$kbytes_read_sec >= $crit_kbytes_read" | bc -q`" == "1" ] || \
+    [ "`echo "$kbytes_written_sec >= $crit_kbytes_written" | bc`" == "1" ] )
+then
+  msg="CRITICAL"
+  status=2
+fi
+fi
+
+if [ "$crit_total" == "99999" ] && [ "$warn_total" == "99999" ]
+then
+  msg="OK"
+  status=0
+
+fi
+
+# IO # Printing the results:
+echo "$msg - I/O stats: Total IO/Sec=$total Read IO/Sec=$read_sec Write IO/Sec=$written_sec KBytes Read/Sec=$kbytes_read_sec KBytes_Written/Sec=$kbytes_written_sec | 'Total IO/Sec'=$total; 'Read IO/Sec'=$read_sec; 'Write IO/Sec'=$written_sec; 'KBytes Read/Sec'=$kbytes_read_sec; 'KKBytes_Written/Sec'=$kbytes_written_sec;"
+
+fi
+
+
+## QUEUE Check ##
+if [ "$queue" == "1" ]
+then
+  total=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $8}'`
+  read_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $2}'`
+  written_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $3}'`
+
+
+  # QUEUE # "Converting" values to float (string replace , with .)
+  total=${total/,/.}
+  read_sec=${read_sec/,/.}
+  written_sec=${written_sec/,/.}
+
+
+
+  # QUEUE # Comparing the result and setting the correct level:
+
+  if [ "$warn_total" -ne "99999" ]
+  then
+    if ( [ "`echo "$total >= $warn_total" | bc`" == "1" ] || [ "`echo "$read_sec >= $warn_read" | bc`" == "1" ] || \
+      [ "`echo "$written_sec >= $warn_written" | bc`" == "1" ] )
+  then
+    msg="WARNING"
+    status=1
+  fi
+fi
+
+if [ "$crit_total" -ne "99999" ]
+then
+  if ( [ "`echo "$total >= $crit_total" | bc`" == "1" ] || [ "`echo "$read_sec >= $crit_read" | bc -q`" == "1" ] || \
+    [ "`echo "$written_sec >= $crit_written" | bc`" == "1" ] )
+then
+  msg="CRITICAL"
+  status=2
+fi
+fi
+
+if [ "$crit_total" == "99999" ] && [ "$warn_total" == "99999" ]
+then
+  msg="OK"
+  status=0
+
+fi
+
+# QUEUE # Printing the results:
+echo "$msg - Disk Queue Stats: Average Queue Length=$total Read Queue/Sec=$read_sec Write Queue/Sec=$written_sec | 'total'=$total; 'Read Queue/Sec'=$read_sec; 'Write Queue/Sec'=$written_sec;"
+
+fi
+
+
+
+## WAIT TIME Check ##
+if [ "$waittime" == "1" ]
+then
+  total=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $10}'`
+  read_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $11}'`
+  written_sec=`$iostat $disk -x -y -k -d 2 1 | grep $disk | awk '{print $12}'`
+
+
+  # QUEUE # "Converting" values to float (string replace , with .)
+  total=${total/,/.}
+  read_sec=${read_sec/,/.}
+  written_sec=${written_sec/,/.}
+
+
+  # WAIT TIME # Comparing the result and setting the correct level:
+
+  if [ "$warn_total" -ne "99999" ]
+  then
+    if ( [ "`echo "$total >= $warn_total" | bc`" == "1" ] || [ "`echo "$read_sec >= $warn_read" | bc`" == "1" ] || \
+      [ "`echo "$written_sec >= $warn_written" | bc`" == "1" ] )
+  then
+    msg="WARNING"
+    status=1
+  fi
+fi
+
+if [ "$crit_total" -ne "99999" ]
+then
+  if ( [ "`echo "$total >= $crit_total" | bc`" == "1" ] || [ "`echo "$read_sec >= $crit_read" | bc -q`" == "1" ] || \
+    [ "`echo "$written_sec >= $crit_written" | bc`" == "1" ] )
+then
+  msg="CRITICAL"
+  status=2
+fi
+fi
+
+if [ "$crit_total" == "99999" ] && [ "$warn_total" == "99999" ]
+then
+  msg="OK"
+  status=0
+
+fi
+
+# WAIT TIME # Printing the results:
+echo "$msg - Wait Time Stats: Avg I/O Wait Time/ms=$total Avg Read Wait Time/ms=$read_sec Avg Write Wait Time/ms=$written_sec | 'Avg I/O Wait Time/ms'=$total; 'Avg Read Wait Time/ms'=$read_sec; 'Avg Write Wait Time/ms'=$written_sec;"
+
+fi
+
+exit $status 
