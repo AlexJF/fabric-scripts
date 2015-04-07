@@ -387,7 +387,7 @@ def updateHosts(privateIps):
     sudo("touch %s" % HOSTS_FILE)
 
     for host, privateIp in privateIps.items():
-        lineNumber = run("grep -n '^%(ip)s' '%(file)s' | cut -d : -f 1" %
+        lineNumber = run("grep -n -F -w -m 1 '%(ip)s' '%(file)s' | cut -d : -f 1" %
                 {"ip": privateIp, "file": HOSTS_FILE})
         try:
             lineNumber = int(lineNumber)
