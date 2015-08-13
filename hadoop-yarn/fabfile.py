@@ -440,7 +440,7 @@ def changeHadoopProperties(fileName, propertyDict):
         run("touch %s" % fileName)
 
         command = "./replaceHadoopProperty.py '%s' %s" % (fileName,
-            " ".join(["%s %s" % (str(key), str(value)) for key, value in propertyDict.items()]))
+            " ".join(["'%s' '%s'" % (str(key), str(value)) for key, value in propertyDict.items()]))
         run(command)
 
 
